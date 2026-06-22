@@ -362,18 +362,29 @@ else:
                     last_date = df_pred.index[-1]
                     # We predict the next 7 'steps' (days)
                     future_dates = [last_date + timedelta(days=i) for i in range(1, 8)]
-                    future_idx = pd.DatetimeIndex(future_dates)
-                    future_epoch = future_idx.astype('int64') / 10**9
                     
-                    future_poly = poly.transform(future_epoch.values.reshape(-1, 1))
-                    future_preds = model.predict(future_poly)
+                    # --- Geometric Brownian Motion (Stochastic) Forecast ---
+                    last_price = df_pred[ai_asset].iloc[-1]
+                    hist_returns = df_pred[ai_asset].pct_change().dropna()
+                    volatility = hist_returns.std()
+                    if pd.isna(volatility) or volatility < 0.005:
+                         volatility = 0.015 # Minimum daily volatility for visual realism
                     
-                    # Apply Sentiment Adjustment (0.2% cumulative per day max)
-                    sentiment_multiplier = 1.0 + (sentiment_score * 0.002)
+                    # Sentiment acts as the daily market drift
+                    drift = sentiment_score * 0.008 
+                    
+                    # Stable seed so it doesn't flicker violently on every 10s auto-refresh
+                    seed_val = int(datetime.now().strftime("%Y%m%d")) + sum(bytearray(ai_asset, 'utf-8'))
+                    np.random.seed(seed_val)
+                    
                     adjusted_preds = []
-                    for i, pred in enumerate(future_preds):
-                        # Compound the sentiment effect over the 7 days
-                        adjusted_preds.append(pred * (sentiment_multiplier ** (i+1)))
+                    current_sim_price = last_price
+                    for i in range(7):
+                        # Random shock combining historical volatility and news sentiment
+                        shock = np.random.normal(loc=drift, scale=volatility)
+                        current_sim_price = current_sim_price * (1 + shock)
+                        adjusted_preds.append(current_sim_price)
+                        
                     future_preds = np.array(adjusted_preds)
                     
                     time_col_ai = 'Date/Time (IST)'
