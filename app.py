@@ -243,16 +243,16 @@ else:
 
         st.markdown("---")
         
-        # --- TABS ---
-        tab_charts, tab_spread, tab_stats, tab_ai, tab_data = st.tabs([
+        # --- TABS (Radio) ---
+        current_tab = st.radio("Navigation", [
             "📈 Price Charts", 
             "⚖️ Spread Analysis", 
             "📊 Summary Statistics", 
             "🤖 AI Prediction",
             "📁 Raw Data"
-        ])
+        ], horizontal=True, label_visibility="collapsed")
 
-        with tab_charts:
+        if current_tab == "📈 Price Charts":
             st.subheader(f"Price Trend: {range_option} (IST)")
             if range_option == "Custom Time Window" and not historical_data.empty:
                 st.caption(f"Showing data for {custom_date} from {custom_start_time.strftime('%H:%M')} to {custom_end_time.strftime('%H:%M')} IST.")
@@ -271,7 +271,7 @@ else:
             else:
                 st.warning("No historical data available for the selected period.")
 
-        with tab_spread:
+        elif current_tab == "⚖️ Spread Analysis":
             st.subheader("Brent vs. WTI Spread Analysis")
             if "Brent Crude" in historical_data.columns and "WTI Crude" in historical_data.columns:
                 if "Brent Crude" in selected_assets and "WTI Crude" in selected_assets:
@@ -290,7 +290,7 @@ else:
             else:
                  st.warning("Spread data is currently unavailable.")
 
-        with tab_stats:
+        elif current_tab == "📊 Summary Statistics":
             st.subheader("Summary Statistics")
             if not historical_data[selected_assets].empty:
                 stats_df = historical_data[selected_assets].describe().T
@@ -305,7 +305,7 @@ else:
             else:
                 st.write("No data available to calculate statistics.")
 
-        with tab_ai:
+        elif current_tab == "🤖 AI Prediction":
             st.subheader("🤖 AI Price Prediction (7-Day Forecast)")
             st.markdown("This feature uses a Machine Learning model (Polynomial Regression) trained on your selected historical data to forecast future trends.")
             
@@ -314,8 +314,9 @@ else:
             if ai_asset and not historical_data.empty and ai_asset in historical_data.columns:
                 df_pred = historical_data[[ai_asset]].copy().dropna()
                 if len(df_pred) > 5:
-                    df_pred['Ordinal'] = df_pred.index.map(datetime.toordinal)
-                    X = df_pred[['Ordinal']].values
+                    # Convert DatetimeIndex to Epoch Seconds for precision in training
+                    df_pred['Epoch'] = df_pred.index.astype('int64') / 10**9
+                    X = df_pred[['Epoch']].values
                     y = df_pred[ai_asset].values
                     
                     poly = PolynomialFeatures(degree=2)
@@ -326,9 +327,12 @@ else:
                     df_pred['AI Trend'] = model.predict(X_poly)
                     
                     last_date = df_pred.index[-1]
+                    # We predict the next 7 'steps' (days)
                     future_dates = [last_date + timedelta(days=i) for i in range(1, 8)]
-                    future_ordinal = np.array([d.toordinal() for d in future_dates]).reshape(-1, 1)
-                    future_poly = poly.transform(future_ordinal)
+                    future_idx = pd.DatetimeIndex(future_dates)
+                    future_epoch = future_idx.astype('int64') / 10**9
+                    
+                    future_poly = poly.transform(future_epoch.values.reshape(-1, 1))
                     future_preds = model.predict(future_poly)
                     
                     time_col_ai = 'Date/Time (IST)'
@@ -358,7 +362,7 @@ else:
                 else:
                     st.warning("Not enough data points to train the AI model. Please select a larger time range.")
 
-        with tab_data:
+        elif current_tab == "📁 Raw Data":
             st.subheader("Raw Data (IST)")
             if not historical_data.empty:
                 table_data = historical_data[selected_assets].sort_index(ascending=False).copy()
