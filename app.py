@@ -5,6 +5,9 @@ import plotly.express as px
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from streamlit_autorefresh import st_autorefresh
+import numpy as np
+from sklearn.linear_model import LinearRegression
+from sklearn.preprocessing import PolynomialFeatures
 
 # --- Config ---
 st.set_page_config(page_title="IOCL Market Dashboard", page_icon="🛢️", layout="wide")
@@ -241,10 +244,11 @@ else:
         st.markdown("---")
         
         # --- TABS ---
-        tab_charts, tab_spread, tab_stats, tab_data = st.tabs([
+        tab_charts, tab_spread, tab_stats, tab_ai, tab_data = st.tabs([
             "📈 Price Charts", 
             "⚖️ Spread Analysis", 
             "📊 Summary Statistics", 
+            "🤖 AI Prediction",
             "📁 Raw Data"
         ])
 
@@ -300,6 +304,59 @@ else:
                     st.dataframe(stats_df, use_container_width=True)
             else:
                 st.write("No data available to calculate statistics.")
+
+        with tab_ai:
+            st.subheader("🤖 AI Price Prediction (7-Day Forecast)")
+            st.markdown("This feature uses a Machine Learning model (Polynomial Regression) trained on your selected historical data to forecast future trends.")
+            
+            ai_asset = st.selectbox("Select Asset to Predict:", selected_assets)
+            
+            if ai_asset and not historical_data.empty and ai_asset in historical_data.columns:
+                df_pred = historical_data[[ai_asset]].copy().dropna()
+                if len(df_pred) > 5:
+                    df_pred['Ordinal'] = df_pred.index.map(datetime.toordinal)
+                    X = df_pred[['Ordinal']].values
+                    y = df_pred[ai_asset].values
+                    
+                    poly = PolynomialFeatures(degree=2)
+                    X_poly = poly.fit_transform(X)
+                    model = LinearRegression()
+                    model.fit(X_poly, y)
+                    
+                    df_pred['AI Trend'] = model.predict(X_poly)
+                    
+                    last_date = df_pred.index[-1]
+                    future_dates = [last_date + timedelta(days=i) for i in range(1, 8)]
+                    future_ordinal = np.array([d.toordinal() for d in future_dates]).reshape(-1, 1)
+                    future_poly = poly.transform(future_ordinal)
+                    future_preds = model.predict(future_poly)
+                    
+                    time_col_ai = 'Date/Time (IST)'
+                    future_df = pd.DataFrame({
+                        time_col_ai: future_dates,
+                        'AI Forecast': future_preds
+                    })
+                    
+                    plot_hist = df_pred.reset_index()
+                    hist_time_col = plot_hist.columns[0]
+                    
+                    import plotly.graph_objects as go
+                    fig_ai = go.Figure()
+                    
+                    fig_ai.add_trace(go.Scatter(x=plot_hist[hist_time_col], y=plot_hist[ai_asset], mode='lines', name=f'Historical {ai_asset}'))
+                    fig_ai.add_trace(go.Scatter(x=plot_hist[hist_time_col], y=plot_hist['AI Trend'], mode='lines', name='AI Learned Trend', line=dict(dash='dot', color='orange')))
+                    fig_ai.add_trace(go.Scatter(x=future_df[time_col_ai], y=future_df['AI Forecast'], mode='lines+markers', name='7-Day Forecast', line=dict(color='red', width=3)))
+                    
+                    fig_ai.update_layout(title=f"AI Forecast for {ai_asset}", hovermode="x unified", xaxis_title="Date/Time (IST)", yaxis_title=f"Price ({UNITS[ai_asset]})")
+                    st.plotly_chart(fig_ai, use_container_width=True)
+                    
+                    st.write("**Forecasted Values:**")
+                    future_df_disp = future_df.copy()
+                    future_df_disp[time_col_ai] = future_df_disp[time_col_ai].apply(lambda x: x.strftime('%Y-%m-%d'))
+                    future_df_disp['AI Forecast'] = future_df_disp['AI Forecast'].apply(lambda x: f"₹ {x:,.2f}")
+                    st.dataframe(future_df_disp, hide_index=True)
+                else:
+                    st.warning("Not enough data points to train the AI model. Please select a larger time range.")
 
         with tab_data:
             st.subheader("Raw Data (IST)")
