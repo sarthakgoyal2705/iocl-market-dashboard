@@ -8,6 +8,7 @@ from streamlit_autorefresh import st_autorefresh
 import numpy as np
 from sklearn.linear_model import LinearRegression
 from sklearn.preprocessing import PolynomialFeatures
+from textblob import TextBlob
 
 # --- Config ---
 st.set_page_config(page_title="IOCL Market Dashboard", page_icon="🛢️", layout="wide")
@@ -326,6 +327,26 @@ else:
                     
                     df_pred['AI Trend'] = model.predict(X_poly)
                     
+                    # --- AI SENTIMENT INTEGRATION ---
+                    ticker_symbol = SYMBOLS[ai_asset]
+                    news_data = []
+                    sentiment_score = 0.0
+                    try:
+                        ticker_obj = yf.Ticker(ticker_symbol)
+                        news = ticker_obj.news
+                        if news:
+                            polarities = []
+                            for article in news[:5]: # Top 5 recent articles
+                                title = article.get('title', '')
+                                if title:
+                                    pol = TextBlob(title).sentiment.polarity
+                                    polarities.append(pol)
+                                    news_data.append({"Headline": title, "Polarity": round(pol, 2)})
+                            if polarities:
+                                sentiment_score = np.mean(polarities)
+                    except Exception:
+                        pass
+                    
                     last_date = df_pred.index[-1]
                     # We predict the next 7 'steps' (days)
                     future_dates = [last_date + timedelta(days=i) for i in range(1, 8)]
@@ -334,6 +355,14 @@ else:
                     
                     future_poly = poly.transform(future_epoch.values.reshape(-1, 1))
                     future_preds = model.predict(future_poly)
+                    
+                    # Apply Sentiment Adjustment (0.2% cumulative per day max)
+                    sentiment_multiplier = 1.0 + (sentiment_score * 0.002)
+                    adjusted_preds = []
+                    for i, pred in enumerate(future_preds):
+                        # Compound the sentiment effect over the 7 days
+                        adjusted_preds.append(pred * (sentiment_multiplier ** (i+1)))
+                    future_preds = np.array(adjusted_preds)
                     
                     time_col_ai = 'Date/Time (IST)'
                     future_df = pd.DataFrame({
@@ -349,16 +378,32 @@ else:
                     
                     fig_ai.add_trace(go.Scatter(x=plot_hist[hist_time_col], y=plot_hist[ai_asset], mode='lines', name=f'Historical {ai_asset}'))
                     fig_ai.add_trace(go.Scatter(x=plot_hist[hist_time_col], y=plot_hist['AI Trend'], mode='lines', name='AI Learned Trend', line=dict(dash='dot', color='orange')))
-                    fig_ai.add_trace(go.Scatter(x=future_df[time_col_ai], y=future_df['AI Forecast'], mode='lines+markers', name='7-Day Forecast', line=dict(color='red', width=3)))
+                    fig_ai.add_trace(go.Scatter(x=future_df[time_col_ai], y=future_df['AI Forecast'], mode='lines+markers', name='7-Day Forecast', line=dict(dash='dot', color='red', width=3)))
                     
                     fig_ai.update_layout(title=f"AI Forecast for {ai_asset}", hovermode="x unified", xaxis_title="Date/Time (IST)", yaxis_title=f"Price ({UNITS[ai_asset]})")
                     st.plotly_chart(fig_ai, use_container_width=True)
                     
-                    st.write("**Forecasted Values:**")
-                    future_df_disp = future_df.copy()
-                    future_df_disp[time_col_ai] = future_df_disp[time_col_ai].apply(lambda x: x.strftime('%Y-%m-%d'))
-                    future_df_disp['AI Forecast'] = future_df_disp['AI Forecast'].apply(lambda x: f"₹ {x:,.2f}")
-                    st.dataframe(future_df_disp, hide_index=True)
+                    # Sentiment Display
+                    col1, col2 = st.columns([1, 2])
+                    with col1:
+                        st.write("**Forecasted Values:**")
+                        future_df_disp = future_df.copy()
+                        future_df_disp[time_col_ai] = future_df_disp[time_col_ai].apply(lambda x: x.strftime('%Y-%m-%d'))
+                        future_df_disp['AI Forecast'] = future_df_disp['AI Forecast'].apply(lambda x: f"₹ {x:,.2f}")
+                        st.dataframe(future_df_disp, hide_index=True)
+                    
+                    with col2:
+                        mood = "Neutral 😐"
+                        if sentiment_score > 0.1: mood = "Bullish 📈"
+                        elif sentiment_score < -0.1: mood = "Bearish 📉"
+                        
+                        st.info(f"**AI Market Sentiment:** {mood} (Score: {sentiment_score:.2f})\nThe mathematical prediction curve has been intelligently adjusted based on the real-time sentiment from breaking news.")
+                        with st.expander("📰 View Analyzed News Headlines"):
+                            if news_data:
+                                for article in news_data:
+                                    st.write(f"- {article['Headline']} (Polarity: {article['Polarity']})")
+                            else:
+                                st.write("No recent news found to analyze.")
                 else:
                     st.warning("Not enough data points to train the AI model. Please select a larger time range.")
 

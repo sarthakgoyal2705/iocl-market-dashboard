@@ -5,3 +5,4 @@ plotly
 streamlit-autorefresh
 scikit-learn
 numpy
+textblob
