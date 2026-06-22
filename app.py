@@ -334,10 +334,22 @@ else:
                     try:
                         ticker_obj = yf.Ticker(ticker_symbol)
                         news = ticker_obj.news
+                        
+                        # Fallback proxies for global news if futures/forex return empty
+                        if not news:
+                            if "Crude" in ai_asset:
+                                news = yf.Ticker("USO").news # US Oil Fund
+                            elif "USD" in ai_asset:
+                                news = yf.Ticker("UUP").news # US Dollar Index Fund
+                                
                         if news:
                             polarities = []
                             for article in news[:5]: # Top 5 recent articles
-                                title = article.get('title', '')
+                                if 'content' in article and isinstance(article['content'], dict):
+                                    title = article['content'].get('title', '')
+                                else:
+                                    title = article.get('title', '')
+                                    
                                 if title:
                                     pol = TextBlob(title).sentiment.polarity
                                     polarities.append(pol)
