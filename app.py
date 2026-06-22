@@ -4,6 +4,7 @@ import pandas as pd
 import plotly.express as px
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
+from streamlit_autorefresh import st_autorefresh
 
 # --- Config ---
 st.set_page_config(page_title="IOCL Market Dashboard", page_icon="🛢️", layout="wide")
@@ -26,6 +27,9 @@ UNITS = {
 
 # --- Sidebar Controls ---
 st.sidebar.header("Controls")
+
+# Auto-refresh every 10 seconds (10000 milliseconds)
+st_autorefresh(interval=10000, limit=None, key="auto_refresh")
 
 if st.sidebar.button("🔄 Force Refresh Data"):
     st.cache_data.clear()
@@ -100,7 +104,7 @@ with st.sidebar.expander("🔔 Price Alerts"):
 
 
 # --- Data Fetching ---
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=10)
 def fetch_data(tickers, period, interval, start=None, end=None):
     fetch_tickers = tickers.copy()
     if "USD/INR" not in fetch_tickers:
