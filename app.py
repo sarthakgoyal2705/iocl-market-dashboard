@@ -14,7 +14,7 @@ from textblob import TextBlob
 st.set_page_config(page_title="IOCL Market Dashboard", page_icon="🛢️", layout="wide")
 
 st.title("🛢️ IOCL Market Dashboard")
-st.markdown("Track USD/INR exchange rates and Crude Oil prices over time. **All prices are shown in Indian Rupees (₹) and times in IST.**")
+st.markdown("Track USD/INR exchange rates and Crude Oil prices over time. **Times are in IST.**")
 
 # --- Tickers & Units ---
 SYMBOLS = {
@@ -25,8 +25,14 @@ SYMBOLS = {
 
 UNITS = {
     "USD/INR": "₹ per $",
-    "Brent Crude": "₹ per Barrel",
-    "WTI Crude": "₹ per Barrel"
+    "Brent Crude": "$ per Barrel",
+    "WTI Crude": "$ per Barrel"
+}
+
+CURRENCY_SYMBOLS = {
+    "USD/INR": "₹",
+    "Brent Crude": "$",
+    "WTI Crude": "$"
 }
 
 # --- Sidebar Controls ---
@@ -104,7 +110,7 @@ with st.sidebar.expander("🔔 Price Alerts"):
     alert_active = st.checkbox("Enable Alert")
     alert_asset = st.selectbox("Asset for Alert:", list(SYMBOLS.keys()))
     alert_condition = st.selectbox("Condition:", ["Drops Below", "Rises Above"])
-    alert_price = st.number_input(f"Target Price (₹)", value=6000.0, step=100.0)
+    alert_price = st.number_input(f"Target Price", value=80.0, step=5.0)
 
 
 # --- Data Fetching ---
@@ -146,13 +152,6 @@ def fetch_data(tickers, period, interval, start=None, end=None):
             combined_df.index = combined_df.index.tz_convert(ZoneInfo('Asia/Kolkata'))
         except Exception:
             pass
-            
-        if 'USD/INR' in combined_df.columns:
-            usd_inr_series = combined_df['USD/INR']
-            if 'Brent Crude' in combined_df.columns:
-                combined_df['Brent Crude'] = combined_df['Brent Crude'] * usd_inr_series
-            if 'WTI Crude' in combined_df.columns:
-                combined_df['WTI Crude'] = combined_df['WTI Crude'] * usd_inr_series
 
     current_prices = {}
     daily_data = {}
@@ -166,12 +165,7 @@ def fetch_data(tickers, period, interval, start=None, end=None):
             pass
             
     daily_df = pd.DataFrame(daily_data).ffill()
-    if not daily_df.empty and 'USD/INR' in daily_df.columns:
-        if 'Brent Crude' in daily_df.columns:
-            daily_df['Brent Crude'] = daily_df['Brent Crude'] * daily_df['USD/INR']
-        if 'WTI Crude' in daily_df.columns:
-            daily_df['WTI Crude'] = daily_df['WTI Crude'] * daily_df['USD/INR']
-            
+    if not daily_df.empty:
         for name in fetch_tickers.keys():
             if name in daily_df.columns:
                 series = daily_df[name].dropna()
@@ -222,10 +216,11 @@ else:
         # --- Active Alerts Check ---
         if alert_active and alert_asset in current_data:
             curr_price = current_data[alert_asset]['price']
+            currency = CURRENCY_SYMBOLS[alert_asset]
             if alert_condition == "Drops Below" and curr_price < alert_price:
-                st.error(f"🚨 **ALERT!** {alert_asset} has dropped below ₹{alert_price:,.2f} (Current: ₹{curr_price:,.2f})", icon="🚨")
+                st.error(f"🚨 **ALERT!** {alert_asset} has dropped below {currency}{alert_price:,.2f} (Current: {currency}{curr_price:,.2f})", icon="🚨")
             elif alert_condition == "Rises Above" and curr_price > alert_price:
-                st.warning(f"🚨 **ALERT!** {alert_asset} has risen above ₹{alert_price:,.2f} (Current: ₹{curr_price:,.2f})", icon="📈")
+                st.warning(f"🚨 **ALERT!** {alert_asset} has risen above {currency}{alert_price:,.2f} (Current: {currency}{curr_price:,.2f})", icon="📈")
 
         # --- KPIs ---
         st.subheader("Current Market Rates")
@@ -235,10 +230,11 @@ else:
                 price = current_data[asset]['price']
                 change = current_data[asset]['change']
                 unit = UNITS[asset]
+                currency = CURRENCY_SYMBOLS[asset]
                 
                 cols[idx].metric(
                     label=f"{asset} ({unit})",
-                    value=f"₹ {price:,.2f}",
+                    value=f"{currency}{price:,.2f}",
                     delta=f"{change:.2f}%"
                 )
 
@@ -281,8 +277,8 @@ else:
                     spread_df['Spread'] = spread_df['Brent Crude'] - spread_df['WTI Crude']
                     
                     fig_spread = px.area(spread_df, x=time_col, y="Spread",
-                                         title="Premium of Brent Crude over WTI Crude (₹ per Barrel)",
-                                         labels={"Spread": "Spread (₹)", time_col: "Date/Time (IST)"})
+                                         title="Premium of Brent Crude over WTI Crude ($ per Barrel)",
+                                         labels={"Spread": "Spread ($)", time_col: "Date/Time (IST)"})
                     fig_spread.update_layout(hovermode="x unified")
                     st.plotly_chart(fig_spread, use_container_width=True)
                     st.info("💡 **What is this?** The 'Spread' represents the price difference between Brent Crude and WTI Crude. A wider spread often indicates supply constraints in the Brent market or oversupply in the WTI market.")
@@ -299,8 +295,12 @@ else:
                     stats_df = stats_df[['min', 'max', 'mean', 'std']]
                     stats_df.rename(columns={'min': 'Lowest Price', 'max': 'Highest Price', 'mean': 'Average Price', 'std': 'Volatility (Std Dev)'}, inplace=True)
                     
-                    for col in stats_df.columns:
-                        stats_df[col] = stats_df[col].apply(lambda x: f"₹ {x:,.2f}" if pd.notnull(x) else "N/A")
+                    # Apply currency symbol dynamically
+                    for asset in stats_df.index:
+                        curr = CURRENCY_SYMBOLS.get(asset, "")
+                        for col in stats_df.columns:
+                            val = stats_df.at[asset, col]
+                            stats_df.at[asset, col] = f"{curr}{val:,.2f}" if pd.notnull(val) else "N/A"
                         
                     st.dataframe(stats_df, use_container_width=True)
             else:
@@ -412,7 +412,9 @@ else:
                         st.write("**Forecasted Values:**")
                         future_df_disp = future_df.copy()
                         future_df_disp[time_col_ai] = future_df_disp[time_col_ai].apply(lambda x: x.strftime('%Y-%m-%d'))
-                        future_df_disp['AI Forecast'] = future_df_disp['AI Forecast'].apply(lambda x: f"₹ {x:,.2f}")
+                        
+                        currency = CURRENCY_SYMBOLS[ai_asset]
+                        future_df_disp['AI Forecast'] = future_df_disp['AI Forecast'].apply(lambda x: f"{currency}{x:,.2f}")
                         st.dataframe(future_df_disp, hide_index=True)
                     
                     with col2:
